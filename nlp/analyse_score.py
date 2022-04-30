@@ -1,6 +1,8 @@
-from re import L
+
+
+from nlp.analyse import _all_str, is_close_match
 from nlp.setup import _get_french_tokenizer as _tokenizer, _download
-import difflib
+
 
 _positive_word_chains = [
     'oui',
@@ -35,22 +37,11 @@ tokenizer = _tokenizer()
 positive_word_chains = [*map(lambda wc: [*tokenizer._tokenize_words(wc)], _positive_word_chains)]
 negative_word_chains = [*map(lambda wc: [*tokenizer._tokenize_words(wc)], _negative_word_chains)]
 
-def _all_str(punkt_tokens):
-    return list(map(str, punkt_tokens))
 
-def is_close_match(word1, word2, cutoff=0.8):
-    s = difflib.SequenceMatcher()
-    s.set_seq1(word1)
-    s.set_seq2(word2)
-    # Pretty much copied from difflib.get_close_matches but for a single entity
-    return s.real_quick_ratio() >= cutoff and \
-        s.quick_ratio() >= cutoff and \
-        s.ratio() >= cutoff
-
-
-def contains_wordchain(tokenized_string, wordchain, allow_fragmentation=7):
+def score_wordchain(tokenized_string, wordchain, allow_fragmentation=7):
     # allow fragmentation allows for the number of words we can skip ahead to find what we want
     # Assuming both are List[PunktToken]
+    score = 0
     str_wordchain = _all_str(wordchain)
     for i in range(0, len(tokenized_string) - len(wordchain) + 1):
         # Allow minor differences
@@ -60,26 +51,25 @@ def contains_wordchain(tokenized_string, wordchain, allow_fragmentation=7):
             # While in valid regions
             if is_close_match(str(tokenized_string[i+offset_search_index]), str_wordchain[wordchain_index]):
                 # print(f"!! Strayed {offset_search_index} from {i} to find {str_wordchain[wordchain_index]} of {str_wordchain}. Found {str(tokenized_string[i+offset_search_index])}")
+                # Score lower if strayed far
+                score += 1 if offset_search_index == 0 else 1/offset_search_index
                 wordchain_index += 1
                 if wordchain_index == len(str_wordchain):
                     # This worchain has made it to the end of testing
-                    return True
+                    return score
             # else:
             #     print(f"Straying {offset_search_index} from {i} to find {str_wordchain[wordchain_index]} of {str_wordchain}. Found {str(tokenized_string[i+offset_search_index])}")
             offset_search_index += 1
     
-    return False
+    # Was not a match, score 0
+    return 0
 
 
-def contains_wordchains(tokenized_string, word_chain_list):
-    total = 0
+def calculate_score_list(tokenized_string, word_chain_list):
+    results = []
     for wordchain in word_chain_list:
-        if contains_wordchain(tokenized_string, wordchain):
-            total += 1
-            print(wordchain, "triggered", tokenized_string)
-    
-    return total
+        score = score_wordchain(tokenized_string, wordchain)
+        if score > 0:
+            results.append((wordchain, score))
 
-def positive_negative_count(string):
-    string = [*tokenizer._tokenize_words(string)]
-    return (contains_wordchains(string, positive_word_chains), contains_wordchains(string, negative_word_chains))
+    return results
